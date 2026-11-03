@@ -33,7 +33,7 @@ public class HikvisionService {
 
     private final String HIK_URL = "http://192.168.10.220/ISAPI/AccessControl/AcsEvent?format=json";
 
-    @Scheduled(fixedRate = 300000)
+//    @Scheduled(fixedRate = 300000)
     public void fetchAndSaveAccessLogs() {
         try {
             LocalDateTime now = LocalDateTime.now();
