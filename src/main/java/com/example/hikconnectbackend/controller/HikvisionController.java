@@ -2,6 +2,7 @@ package com.example.hikconnectbackend.controller;
 
 import com.example.hikconnectbackend.entities.AccessLog;
 import com.example.hikconnectbackend.repositories.AccessLogRepository;
+import com.example.hikconnectbackend.services.HikvisionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -9,22 +10,26 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.example.hikconnectbackend.services.HikvisionService;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @RestController
 @RequestMapping("/api/hikvision")
+@CrossOrigin(origins = {"http://localhost:3000"})
 public class HikvisionController {
+
     @Autowired
     private HikvisionService hikvisionService;
 
@@ -32,6 +37,52 @@ public class HikvisionController {
     private AccessLogRepository accessLogRepository;
 
     private final String UPLOAD_DIR = "uploads/images/";
+
+    /**
+     * What the frontend receives. Using a DTO means the page gets a ready-to-use
+     * pictureUrl instead of the absolute file path stored on the server.
+     */
+    public record AccessLogResponse(
+            Long id,
+            String employeeId,
+            String name,
+            String scanTime,
+            String deviceIp,
+            Integer doorNo,
+            String authType,
+            String pictureUrl
+    ) {}
+
+    private AccessLogResponse toResponse(AccessLog a) {
+        String pictureUrl = null;
+        if (a.getPicturePath() != null && !a.getPicturePath().isBlank()) {
+            String fileName = Paths.get(a.getPicturePath()).getFileName().toString();
+            // e.g. http://localhost:9090/images/12345_1700000000000.jpg
+            pictureUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                    .path("/images/")
+                    .path(fileName)
+                    .toUriString();
+        }
+        return new AccessLogResponse(
+                a.getId(),
+                a.getEmployeeId(),
+                a.getName(),
+                a.getScanTime(),
+                a.getDeviceIp(),
+                a.getDoorNo(),
+                a.getAuthType(),
+                pictureUrl
+        );
+    }
+
+    private void validateDate(String value, String field) {
+        if (value == null || value.isBlank()) return;
+        try {
+            LocalDate.parse(value); // expects yyyy-MM-dd
+        } catch (DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be in yyyy-MM-dd format");
+        }
+    }
 
     @GetMapping("/sync-logs")
     public String synLogs() {
@@ -47,14 +98,23 @@ public class HikvisionController {
     }
 
     @GetMapping("/logs/page")
-    public ResponseEntity<Page<AccessLog>> getAccessLogsPaged(
+    public ResponseEntity<Page<AccessLogResponse>> getAccessLogsPaged(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String keyword) {
 
-        Page<AccessLog> logsPage = hikvisionService.getAccessLogsWithPagination(page, size, startDate, endDate);
-        return ResponseEntity.ok(logsPage);
+        validateDate(startDate, "startDate");
+        validateDate(endDate, "endDate");
+
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+        Page<AccessLog> logsPage = hikvisionService.getAccessLogsWithPagination(
+                safePage, safeSize, startDate, endDate, keyword);
+
+        return ResponseEntity.ok(logsPage.map(this::toResponse));
     }
 
     @PostMapping(value = "/receive", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

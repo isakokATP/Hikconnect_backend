@@ -125,12 +125,30 @@ public class HikvisionService {
     }
 
     public Page<AccessLog> getAccessLogsWithPagination(int page, int size, String startDate, String endDate) {
+        return getAccessLogsWithPagination(page, size, startDate, endDate, null);
+    }
+
+    public Page<AccessLog> getAccessLogsWithPagination(int page, int size, String startDate, String endDate, String keyword) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"));
 
+        Page<AccessLog> result;
         if (startDate != null && endDate != null && !startDate.isEmpty() && !endDate.isEmpty()) {
-            return accessLogRepository.findByScanTimeBetween(startDate, endDate, pageable);
+            result = accessLogRepository.findByScanTimeBetween(startDate, endDate, pageable);
+        } else {
+            result = accessLogRepository.findAll(pageable);
         }
 
-        return accessLogRepository.findAll(pageable);
+        if (keyword == null || keyword.isBlank()) {
+            return result;
+        }
+
+        String lowerKeyword = keyword.toLowerCase();
+        List<AccessLog> filtered = result.getContent().stream()
+                .filter(log ->
+                        (log.getEmployeeId() != null && log.getEmployeeId().toLowerCase().contains(lowerKeyword))
+                                || (log.getName() != null && log.getName().toLowerCase().contains(lowerKeyword)))
+                .toList();
+
+        return new org.springframework.data.domain.PageImpl<>(filtered, pageable, filtered.size());
     }
 }
